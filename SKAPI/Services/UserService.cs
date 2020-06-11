@@ -1,6 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using SKAPI.Entities;
 using SKAPI.Helpers;
 using SKAPI.Data ;
@@ -21,10 +26,12 @@ namespace SKAPI.Services
     public class UserService : IUserService
     {
         private DataContext _context;
+        private readonly AppSettings _appSettings;
 
-        public UserService(DataContext context)
+        public UserService(DataContext context ,IOptions<AppSettings> appSet)
         {
             _context = context;
+            _appSettings = appSet.Value ;
         }
 
         public User Authenticate(string username, string password)
@@ -43,17 +50,33 @@ namespace SKAPI.Services
                 return null;
 
             // authentication successful
-            return user;
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.ASCII.GetBytes(_appSettings.Secret);
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new Claim[] 
+                {
+                    new Claim(ClaimTypes.Name, user.Id.ToString()),
+                    new Claim(ClaimTypes.Role, user.Role)
+                }),
+                Expires = DateTime.UtcNow.AddDays(7),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            user.Token = tokenHandler.WriteToken(token);
+
+            return user.WithoutPassword();
         }
 
         public IEnumerable<User> GetAll()
         {
-            return _context.Users;
+            return _context.Users.WithoutPasswords();
         }
 
         public User GetById(int id)
         {
-            return _context.Users.Find(id);
+            var _user = _context.Users.Find(id);
+            return _user.WithoutPassword();
         }
 
         public User Create(User user, string password)
